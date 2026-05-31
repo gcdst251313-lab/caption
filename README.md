@@ -1,1 +1,407 @@
-c
+c<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>소리 레이더 & 실시간 자막 시스템</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #0d1117;
+            color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            min-height: 100vh;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        h1 {
+            font-size: 1.6rem;
+            margin-bottom: 5px;
+            color: #58a6ff;
+        }
+
+        .description {
+            font-size: 0.9rem;
+            color: #8b949e;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        #start-btn {
+            padding: 14px 28px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            background-color: #238636;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 12px rgba(35, 134, 54, 0.3);
+        }
+
+        #start-btn:hover {
+            background-color: #2ea043;
+        }
+
+        /* 메인 레이아웃: 레이더와 자막을 가로 배치 (화면이 작아지면 세로) */
+        .main-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: flex-start;
+            gap: 30px;
+            width: 100%;
+            max-width: 1000px;
+        }
+
+        .radar-box {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        #radar-container {
+            position: relative;
+            width: 360px;
+            height: 360px;
+        }
+
+        canvas {
+            border-radius: 50%;
+            box-shadow: 0 0 20px rgba(88, 166, 255, 0.15);
+            background: radial-gradient(circle, #161b22 0%, #0d1117 100%);
+        }
+
+        #info-panel {
+            margin-top: 15px;
+            font-size: 1rem;
+            font-weight: 500;
+            color: #8b949e;
+            text-align: center;
+            height: 24px;
+        }
+
+        /* 자막 창 스타일 */
+        .caption-container {
+            flex: 1;
+            min-width: 320px;
+            max-width: 550px;
+            height: 400px;
+            background-color: #161b22;
+            border: 2px solid #30363d;
+            border-radius: 12px;
+            padding: 20px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .caption-header {
+            font-size: 1.1rem;
+            font-weight: bold;
+            color: #58a6ff;
+            border-bottom: 1px solid #30363d;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        #stt-status {
+            font-size: 0.85rem;
+            color: #8b949e;
+            font-weight: normal;
+        }
+
+        /* 자막이 표시되는 스크롤 영역 */
+        #caption-box {
+            flex: 1;
+            overflow-y: auto;
+            font-size: 1.25rem;
+            line-height: 1.6;
+            color: #ecf2f8;
+            padding-right: 5px;
+            word-break: break-all;
+        }
+
+        /* 방금 말한 실시간 자막 강조 */
+        .interim {
+            color: #8b949e;
+            font-style: italic;
+        }
+
+        .final {
+            color: #ffffff;
+            font-weight: 500;
+            margin-bottom: 8px;
+            animation: fadeIn 0.3s ease-in-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+
+    <h1>소리 레이더 & AI 실시간 자막</h1>
+    <p class="description">교실 환경에서 교사·친구들의 소리 방향을 확인하고, 동시에 말소리를 자막으로 읽을 수 있습니다.</p>
+   
+    <button id="start-btn">시스템 시작하기 (마이크 허용)</button>
+   
+    <div class="main-container">
+        <div class="radar-box">
+            <div id="radar-container">
+                <canvas id="radarCanvas" width="360" height="360"></canvas>
+            </div>
+            <div id="info-panel">시스템 시작 버튼을 눌러주세요.</div>
+        </div>
+
+        <div class="caption-container">
+            <div class="caption-header">
+                <span>실시간 수업 자막</span>
+                <span id="stt-status">대기 중</span>
+            </div>
+            <div id="caption-box">
+                <span style="color: #8b949e; font-size: 1rem;">마이크가 켜지면 이곳에 실시간 자막이 표시됩니다...</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const startBtn = document.getElementById('start-btn');
+        const canvas = document.getElementById('radarCanvas');
+        const ctx = canvas.getContext('2d');
+        const infoPanel = document.getElementById('info-panel');
+        const captionBox = document.getElementById('caption-box');
+        const sttStatus = document.getElementById('stt-status');
+
+        const WIDTH = canvas.width;
+        const HEIGHT = canvas.height;
+        const CENTER_X = WIDTH / 2;
+        const CENTER_Y = HEIGHT / 2;
+        const MAX_RADIUS = WIDTH / 2 - 10;
+
+        let audioContext;
+        let analyserL, analyserR;
+        let isRunning = false;
+       
+        // Web Speech API 설정
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition;
+
+        if (!SpeechRecognition) {
+            sttStatus.innerText = "지원 안 함 (크롬/엣지 권장)";
+            sttStatus.style.color = "#ff7b72";
+        }
+
+        // 레이더 배경 그리기
+        function drawRadarBackground() {
+            ctx.clearRect(0, 0, WIDTH, HEIGHT);
+            ctx.strokeStyle = 'rgba(88, 166, 255, 0.15)';
+            ctx.lineWidth = 1;
+           
+            for (let r = MAX_RADIUS / 4; r <= MAX_RADIUS; r += MAX_RADIUS / 4) {
+                ctx.beginPath();
+                ctx.arc(CENTER_X, CENTER_Y, r, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+
+            ctx.beginPath();
+            ctx.moveTo(CENTER_X, 10); ctx.lineTo(CENTER_X, HEIGHT - 10);
+            ctx.moveTo(10, CENTER_Y); ctx.lineTo(WIDTH - 10, CENTER_Y);
+            ctx.stroke();
+
+            ctx.fillStyle = 'rgba(88, 166, 255, 0.4)';
+            ctx.font = '11px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('정면 (선생님)', CENTER_X, 20);
+            ctx.fillText('왼쪽', 25, CENTER_Y + 4);
+            ctx.fillText('오른쪽', WIDTH - 25, CENTER_Y + 4);
+        }
+
+        drawRadarBackground();
+
+        // 메인 시작 이벤트
+        startBtn.addEventListener('click', async () => {
+            if (isRunning) return;
+
+            try {
+                // 1. 오디오 스트림 및 레이더 노드 구성
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+                });
+               
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const source = audioContext.createMediaStreamSource(stream);
+                const splitter = audioContext.createChannelSplitter(2);
+                source.connect(splitter);
+
+                analyserL = audioContext.createAnalyser(); analyserL.fftSize = 256;
+                analyserR = audioContext.createAnalyser(); analyserR.fftSize = 256;
+                splitter.connect(analyserL, 0);
+                splitter.connect(analyserR, 1);
+
+                isRunning = true;
+                startBtn.style.display = 'none';
+                infoPanel.innerText = "소리 분석 중...";
+                captionBox.innerHTML = ""; // 초기 안내 문구 삭제
+
+                updateRadar();
+
+                // 2. 음성 인식(자막) 기능 시작
+                if (SpeechRecognition) {
+                    initSpeechRecognition();
+                }
+
+            } catch (err) {
+                console.error('접근 실패:', err);
+                alert('마이크 접근 권한이 필요합니다.');
+            }
+        });
+
+        // 레이더 애니메이션 루프
+        function updateRadar() {
+            if (!isRunning) return;
+            requestAnimationFrame(updateRadar);
+
+            const bufferLength = analyserL.frequencyBinCount;
+            const dataArrayL = new Uint8Array(bufferLength);
+            const dataArrayR = new Uint8Array(bufferLength);
+           
+            analyserL.getByteFrequencyData(dataArrayL);
+            analyserR.getByteFrequencyData(dataArrayR);
+
+            let sumL = 0, sumR = 0;
+            for (let i = 0; i < bufferLength; i++) {
+                sumL += dataArrayL[i];
+                sumR += dataArrayR[i];
+            }
+            let volL = sumL / bufferLength;
+            let volR = sumR / bufferLength;
+            let totalVol = (volL + volR) / 2;
+
+            drawRadarBackground();
+
+            if (totalVol > 5) {
+                let diff = (volR - volL) / (volL + volR || 1);
+                let targetAngle = (-Math.PI / 2) + (diff * (Math.PI / 3));
+                let radius = (totalVol / 120) * MAX_RADIUS;
+                if (radius > MAX_RADIUS) radius = MAX_RADIUS;
+
+                let targetX = CENTER_X + radius * Math.cos(targetAngle);
+                let targetY = CENTER_Y + radius * Math.sin(targetAngle);
+
+                ctx.beginPath();
+                let pGradient = ctx.createRadialGradient(targetX, targetY, 5, targetX, targetY, radius * 0.5 + 10);
+               
+                if (totalVol > 40) {
+                    pGradient.addColorStop(0, 'rgba(255, 99, 132, 0.8)');
+                    pGradient.addColorStop(1, 'rgba(255, 99, 132, 0)');
+                    infoPanel.innerText = `⚠️ 큰 소리 (${diff < -0.15 ? '왼쪽' : diff > 0.15 ? '오른쪽' : '정면'})`;
+                    infoPanel.style.color = '#ff7b72';
+                } else {
+                    pGradient.addColorStop(0, 'rgba(56, 239, 125, 0.8)');
+                    pGradient.addColorStop(1, 'rgba(17, 153, 142, 0)');
+                    infoPanel.innerText = `소리 위치: ${diff < -0.15 ? '왼쪽' : diff > 0.15 ? '오른쪽' : '정면'}`;
+                    infoPanel.style.color = '#79c0ff';
+                }
+               
+                ctx.fillStyle = pGradient;
+                ctx.arc(targetX, targetY, radius * 0.5 + 10, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+                ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.moveTo(CENTER_X, CENTER_Y); ctx.lineTo(targetX, targetY); ctx.stroke();
+
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath(); ctx.arc(targetX, targetY, 5, 0, Math.PI * 2); ctx.fill();
+            } else {
+                infoPanel.innerText = "조용함";
+                infoPanel.style.color = '#8b949e';
+            }
+        }
+
+        // 음성 인식 설정 및 이벤트 바인딩
+        function initSpeechRecognition() {
+            recognition = new SpeechRecognition();
+            recognition.continuous = true;          // 계속해서 음성 인식 수행
+            recognition.interimResults = true;      // 말하는 도중의 중간 결과도 반환
+            recognition.lang = 'ko-KR';             // 언어 설정 (한국어)
+
+            recognition.onstart = () => {
+                sttStatus.innerText = "🔴 자막 켜짐";
+                sttStatus.style.color = "#38ef7d";
+            };
+
+            recognition.onend = () => {
+                // 중간에 연결이 끊겨도 자동으로 재시작하여 끊김 없는 자막 보장
+                if (isRunning) recognition.start();
+            };
+
+            recognition.onerror = (event) => {
+                console.error("음성 인식 오류:", event.error);
+                if (event.error === 'not-allowed') {
+                    sttStatus.innerText = "권한 거부됨";
+                    sttStatus.style.color = "#ff7b72";
+                }
+            };
+
+            // 음성이 텍스트로 인식될 때마다 실행되는 핵심 함수
+            recognition.onresult = (event) => {
+                let interimTranscript = '';
+                let finalTranscript = '';
+
+                // 기존 자막 중 확정된 것들을 유지하기 위해 히스토리를 별도로 띄우고,
+                // 현재 들어오는 문장들만 동적으로 처리
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript;
+                    } else {
+                        interimTranscript += event.results[i][0].transcript;
+                    }
+                }
+
+                // 확정된 자막 추가하기
+                if (finalTranscript) {
+                    const finalDiv = document.createElement('div');
+                    finalDiv.className = 'final';
+                    finalDiv.innerText = finalTranscript;
+                   
+                    // 임시(인터림) 노드가 있다면 제거 후 최종 텍스트 삽입
+                    const interimSpan = document.getElementById('interim-span');
+                    if (interimSpan) interimSpan.remove();
+                   
+                    captionBox.appendChild(finalDiv);
+                }
+
+                // 말하고 있는 도중의 임시 자막 처리
+                if (interimTranscript) {
+                    let interimSpan = document.getElementById('interim-span');
+                    if (!interimSpan) {
+                        interimSpan = document.createElement('span');
+                        interimSpan.id = 'interim-span';
+                        interimSpan.className = 'interim';
+                        captionBox.appendChild(interimSpan);
+                    }
+                    interimSpan.innerText = ' ' + interimTranscript;
+                }
+
+                // 새로운 자막이 추가될 때 스크롤을 항상 가장 아래로 내리기
+                captionBox.scrollTop = captionBox.scrollHeight;
+            };
+
+            recognition.start();
+        }
+    </script>
+</body>
+</html>
