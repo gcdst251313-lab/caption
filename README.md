@@ -1,4 +1,9 @@
-c<!DOCTYPE html>
+Markdown
+# 점자 번역 플랫폼 소스코드 
+
+아래는 프로젝트의 전체 소스코드입니다.
+
+```<!DOCTYPE html>
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
@@ -400,7 +405,7 @@ c<!DOCTYPE html>
                 captionBox.scrollTop = captionBox.scrollHeight;
             };
 
-            recognition.start();
+            recognition.start();```
         }
     </script>
 </body>
